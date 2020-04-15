@@ -1,10 +1,10 @@
 #include <ESP8266WiFi.h>
 #include <WiFiClient.h>
+#include <ESP8266HTTPClient.h>
 #include <ESP8266WebServer.h>
 #include <ESP8266mDNS.h>
 #include <Arduino.h>
 #include <SPI.h>
-#include <WiFiUDP.h>
 #include "settings.h"
 
 MDNSResponder mdns;
@@ -18,7 +18,15 @@ void sendWOL(const IPAddress ip, const byte mac[]);
 void beginWifi();
 void macStringToBytes(const String mac, byte *bytes);
 
+//for posting the public address
+HTTPClient http;
+String pubipsrv = PUBLICIPSERVER;
+String pubipdest = PUBLICIPDESTINATION;
+int i;
+
 void setup(void){
+  i = 0;
+  
   Serial.begin(115200);
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW); // turn on led
@@ -26,30 +34,9 @@ void setup(void){
   while (!mdns.begin("esp8266", WiFi.localIP())) {}
   udp.begin(9);
 
-  // will display a form that, once submitted, sends a GET to /wol
-  server.on("/", []() {
-    digitalWrite(LED_BUILTIN, HIGH);
-    IPAddress target_ip;
-    target_ip = WiFi.localIP();
-    String html_home_page = HOME_PAGE;
-    html_home_page.replace("{favicon}", FAVICON);
-    html_home_page.replace("{ip1}", String(target_ip[0]));
-    html_home_page.replace("{ip2}", String(target_ip[1]));
-    html_home_page.replace("{ip3}", String(target_ip[2]));
-    server.send(200, "text/html", html_home_page);
-    delay(500); 
-    digitalWrite(LED_BUILTIN, LOW);
-  });
   server.on("/wol", [](){
     digitalWrite(LED_BUILTIN, HIGH);
-    // GET requests to /wol send Wake-On-LAN frames (users should go to / and use the form)
-    // the mac parameter is mandatory and should be a non-delimited MAC address
-    // password is also mandatory
     // example: GET /wol?mac=112233aabbcc&bcast=255&pwd=xxx
-
-    // For security reason, only the final byte of the IP can be edited from the web 
-    // this should prevent this device to be used for DDoS attacks
-    
     if(server.arg("mac").length() <= 12 && server.arg("pwd").length() <= 200 && server.arg("bcast").length() <= 3) {
       String mac = server.arg("mac");
       String p = server.arg("pwd");
@@ -69,7 +56,7 @@ void setup(void){
         server.send(200, "text/plain", "WOL sent to " + target_ip.toString() + " " + mac);
       }
       else {
-        server.send(403, "text/plain", "Invalid password");
+        server.send(403, "text/plain", "WOL request received...");
       }
     }
     else {
@@ -78,12 +65,7 @@ void setup(void){
     delay(1000); 
     digitalWrite(LED_BUILTIN, LOW);
   });
-  server.onNotFound([](){
-    digitalWrite(LED_BUILTIN, HIGH);
-    server.send(404, "text/plain", "");
-    delay(100); 
-    digitalWrite(LED_BUILTIN, LOW);
-  });
+  
   server.begin();
   Serial.println("HTTP server started");
 }
@@ -94,12 +76,27 @@ void loop(void){
      ESP.reset(); 
   }
   server.handleClient();
+  
+  delay(50);
+
+  //every minute, post the public address
+  if (i > 1200){
+    postPublicAddress();
+    i = 0;
+  }
+  
+  i++;
 }
 
 
 void beginWifi() {
+  WiFi.disconnect();
+  WiFi.hostname("WOL Forwarder");
+  WiFi.config(staticIP, gateway, subnet, dns);
+
   WiFi.begin(ssid, password);
   Serial.println("");
+  WiFi.mode(WIFI_STA);
   
   while (WiFi.status() != WL_CONNECTED) {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -152,5 +149,29 @@ void macStringToBytes(const String mac, byte *bytes) {
     }
   } else {
     Serial.println("Incorrect MAC format.");
+  }
+}
+
+int postPublicAddress(){
+  //get Public IP
+  http.begin(pubipsrv);  
+  int httpCode = http.GET();
+  Serial.println(httpCode);
+  if (httpCode > 0) {
+    String payload = http.getString();
+    Serial.println(payload);
+    http.end();
+    
+    //post Public IP
+    http.begin(pubipdest);
+    http.addHeader("Content-Type", "text/plain");
+    httpCode = http.POST(payload);   //Send the request
+    http.end();
+
+    return 0;
+  }
+  else {
+    http.end();
+    return 1;
   }
 }

@@ -1,5 +1,9 @@
 # Wake-on-LAN on the ESP 8266
-A small Wake-on-LAN server powered by the ESP8266.
+A small Wake-on-LAN server powered by the ESP8266
+
+## Added features
+* Static IP
+* Requests the public IP address of the router, and `POST`s it to a server every minute.
 
 ## Description
 [Wake-on-LAN](https://en.wikipedia.org/wiki/Wake-on-LAN) is an Ethernet standard that is used to turn on a computer with a network message. It useful for allowing servers to sleep when idle to conserve power, yet still always be remotely accessible.
